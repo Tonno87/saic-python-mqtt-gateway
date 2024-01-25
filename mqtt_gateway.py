@@ -9,6 +9,7 @@ import signal
 import sys
 import time
 import urllib.parse
+import yaml
 from typing import Callable, cast
 
 import apscheduler.schedulers.asyncio
@@ -579,72 +580,107 @@ def process_arguments() -> Configuration:
                             help='How many % points we should try to refresh the charge state. Environment Variable: '
                                  'CHARGE_MIN_PERCENTAGE', dest='charge_dynamic_polling_min_percentage', required=False,
                             action=EnvDefault, envvar='CHARGE_MIN_PERCENTAGE', default='1.0', type=check_positive_float)
+        parser.add_argument('-c', '--config-file', help='Path to the configuration file', dest='config_file', required=False)
 
-        args = parser.parse_args()
-        config.mqtt_user = args.mqtt_user
-        config.mqtt_password = args.mqtt_password
-        config.mqtt_client_id = args.mqtt_client_id
-        config.charge_dynamic_polling_min_percentage = args.charge_dynamic_polling_min_percentage
-        if args.saic_relogin_delay:
-            config.saic_relogin_delay = args.saic_relogin_delay
-        config.mqtt_topic = args.mqtt_topic
-        config.saic_uri = args.saic_uri
-        config.saic_user = args.saic_user
-        config.saic_password = args.saic_password
-        config.abrp_api_key = args.abrp_api_key
-        if args.abrp_user_token:
-            cfg_value_to_dict(args.abrp_user_token, config.abrp_token_map)
-        if args.battery_capacity_mapping:
-            cfg_value_to_dict(
-                args.battery_capacity_mapping,
-                config.battery_capacity_map,
-                value_type=check_positive_float
-            )
-        if args.open_wp_lp_map:
-            open_wb_lp_map = {}
-            cfg_value_to_dict(args.open_wp_lp_map, open_wb_lp_map)
-            config.charging_stations_by_vin = get_charging_stations(open_wb_lp_map)
-        if args.charging_stations_file:
-            process_charging_stations_file(config, args.charging_stations_file)
-        else:
-            process_charging_stations_file(config, f'./{CHARGING_STATIONS_FILE}')
 
-        config.saic_password = args.saic_password
-
-        if args.ha_discovery_enabled is not None:
-            config.ha_discovery_enabled = args.ha_discovery_enabled
-
-        if args.ha_discovery_prefix:
-            config.ha_discovery_prefix = args.ha_discovery_prefix
-
-        parse_result = urllib.parse.urlparse(args.mqtt_uri)
-        if parse_result.scheme == 'tcp':
-            config.mqtt_transport_protocol = TransportProtocol.TCP
-        elif parse_result.scheme == 'ws':
-            config.mqtt_transport_protocol = TransportProtocol.WS
-        elif parse_result.scheme == 'tls':
-            config.mqtt_transport_protocol = TransportProtocol.TLS
-            if args.tls_server_cert_path:
-                config.tls_server_cert_path = args.tls_server_cert_path
+        try:
+            args = parser.parse_args()
+            if args.config_file:
+                config = read_config_from_file(args.config_file)
             else:
-                raise SystemExit(f'No server certificate authority file provided for TLS MQTT URI {args.mqtt_uri}')
-        else:
-            raise SystemExit(f'Invalid MQTT URI scheme: {parse_result.scheme}, use tcp or ws')
+                config.mqtt_user = args.mqtt_user
+                config.mqtt_password = args.mqtt_password
+                config.mqtt_client_id = args.mqtt_client_id
+                config.charge_dynamic_polling_min_percentage = args.charge_dynamic_polling_min_percentage
+                if args.saic_relogin_delay:
+                    config.saic_relogin_delay = args.saic_relogin_delay
+                config.mqtt_topic = args.mqtt_topic
+                config.saic_uri = args.saic_uri
+                config.saic_user = args.saic_user
+                config.saic_password = args.saic_password
+                config.abrp_api_key = args.abrp_api_key
+                if args.abrp_user_token:
+                    cfg_value_to_dict(args.abrp_user_token, config.abrp_token_map)
+                if args.battery_capacity_mapping:
+                    cfg_value_to_dict(
+                        args.battery_capacity_mapping,
+                        config.battery_capacity_map,
+                        value_type=check_positive_float
+                    )
+                if args.open_wp_lp_map:
+                    open_wb_lp_map = {}
+                    cfg_value_to_dict(args.open_wp_lp_map, open_wb_lp_map)
+                    config.charging_stations_by_vin = get_charging_stations(open_wb_lp_map)
+                if args.charging_stations_file:
+                    process_charging_stations_file(config, args.charging_stations_file)
+                else:
+                    process_charging_stations_file(config, f'./{CHARGING_STATIONS_FILE}')
 
-        if not parse_result.port:
-            if config.mqtt_transport_protocol == 'tcp':
-                config.mqtt_port = 1883
-            else:
-                config.mqtt_port = 9001
-        else:
-            config.mqtt_port = parse_result.port
+                config.saic_password = args.saic_password
 
-        config.mqtt_host = str(parse_result.hostname)
+                if args.ha_discovery_enabled is not None:
+                    config.ha_discovery_enabled = args.ha_discovery_enabled
 
-        return config
-    except argparse.ArgumentError as err:
-        parser.print_help()
-        SystemExit(err)
+                if args.ha_discovery_prefix:
+                    config.ha_discovery_prefix = args.ha_discovery_prefix
+
+                parse_result = urllib.parse.urlparse(args.mqtt_uri)
+                if parse_result.scheme == 'tcp':
+                    config.mqtt_transport_protocol = TransportProtocol.TCP
+                elif parse_result.scheme == 'ws':
+                    config.mqtt_transport_protocol = TransportProtocol.WS
+                elif parse_result.scheme == 'tls':
+                    config.mqtt_transport_protocol = TransportProtocol.TLS
+                    if args.tls_server_cert_path:
+                        config.tls_server_cert_path = args.tls_server_cert_path
+                    else:
+                        raise SystemExit(f'No server certificate authority file provided for TLS MQTT URI {args.mqtt_uri}')
+                else:
+                    raise SystemExit(f'Invalid MQTT URI scheme: {parse_result.scheme}, use tcp or ws')
+
+                if not parse_result.port:
+                    if config.mqtt_transport_protocol == 'tcp':
+                        config.mqtt_port = 1883
+                    else:
+                        config.mqtt_port = 9001
+                else:
+                    config.mqtt_port = parse_result.port
+
+                config.mqtt_host = str(parse_result.hostname)
+
+                return config
+            except argparse.ArgumentError as err:
+                parser.print_help()
+                SystemExit(err)
+
+def read_config_from_file(config_file_path: str) -> Configuration:
+    config = Configuration()
+
+    with open(config_file_path, 'r') as file:
+        yaml_config = yaml.safe_load(file)
+
+    config.mqtt_uri = yaml_config.get('MQTT', {}).get('mqtt_uri', config.mqtt_uri)
+    config.mqtt_user = yaml_config.get('MQTT', {}).get('mqtt_user', config.mqtt_user)
+    config.mqtt_password = yaml_config.get('MQTT', {}).get('mqtt_password', config.mqtt_password)
+    config.mqtt_client_id = yaml_config.get('MQTT', {}.get('mqtt_client_id', config.mqtt_client_id)
+    config.tls_server_cert_path = yaml_config.get('MQTT', {}.get('tls_server_cert_path', config.tls_server_cert_path)
+    config.mqtt_client_id = yaml_config.get('MQTT', {}.get('mqtt_client_id', config.mqtt_client_id)
+    config.mqtt_topic = yaml_config.get('MQTT', {}.get('mqtt_topic', config.mqtt_topic)
+    config.saic_uri = yaml_config.get('SAIC', {}.get('saic_uri', config.saic_uri)
+    config.saic_user = yaml_config.get('SAIC', {}.get('saic_user', config.saic_user)
+    config.saic_password = yaml_config.get('SAIC', {}.get('saic_password', config.saic_password)
+    config.saic_relogin_delay = yaml_config.get('SAIC', {}.get('saic_relogin_delay', config.saic_relogin_delay)
+    config.abrp_api_key = yaml_config.get('ABRP', {}.get('abrp_api_key', config.abrp_api_key)
+    config.abrp_user_token = yaml_config.get('ABRP', {}.get('abrp_user_token', config.abrp_user_token)
+    config.battery_capacity_mapping = yaml_config.get('CAR', {}.get('battery_capacity_mapping', config.battery_capacity_mapping)
+    config.charge_dynamic_polling_min_percentage = yaml_config.get('CAR', {}.get('charge_dynamic_polling_min_percentage', config.charge_dynamic_polling_min_percentage)
+    config.charging_stations_file = yaml_config.get('Charging_Station', {}.get('charging_stations_file', config.charging_stations_file)
+    config.ha_discovery_enabled = yaml_config.get('HA', {}.get('ha_discovery_enabled', config.ha_discovery_enabled)
+    config.ha_discovery_prefix = yaml_config.get('HA', {}.get('ha_discovery_prefix', config.ha_discovery_prefix)
+    
+                                           
+
+    return config
 
 
 def process_charging_stations_file(config: Configuration, json_file: str):
